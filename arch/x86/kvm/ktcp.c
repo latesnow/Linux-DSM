@@ -53,10 +53,12 @@ static unsigned long long timestamp_last;
 #ifdef DEBUG_RECV_KZALLOC_SLEEP
 static uint64_t count_kzalloc;
 static uint64_t totaltime_kzalloc;
-static uint64_t count_sleep;
-static uint64_t totaltime_sleep;
+static uint64_t count_sleep_recv;
+static uint64_t count_sleep_insert;
+static uint64_t totaltime_sleep_recv;
+static uint64_t totaltime_sleep_insert;
 static uint64_t timestamp_last;
-#define REPORT_STAT {printk(KERN_WARNING "RECV_KZALLOC_SLEEP STAT:Time Gap->%8llu:#kzalloc->%8llu:TotalTime in kzalloc->%8llu us:#sleep->%8llu:TotalTime slept->%8llu", et - timestamp_last, count_kzalloc, totaltime_kzalloc, count_sleep, totaltime_sleep);}
+#define REPORT_STAT {printk(KERN_WARNING "RECV_KZALLOC_SLEEP STAT:Time Gap->%llu us:#kzalloc->%llu:kzalloc TotalTime->%llu us:#sleep_recv->%llu:sleep_recv TotalTime->%llu:#sleep_insert->%llu:sleep_insert TotalTime->%llu", et - timestamp_last, count_kzalloc, totaltime_kzalloc, count_sleep_recv, totaltime_sleep_recv, count_sleep_insert, totaltime_sleep_insert);}
 #endif
 
 struct ktcp_hdr {
@@ -337,8 +339,10 @@ repoll:
 			REPORT_STAT
 			count_kzalloc = 0;
 			totaltime_kzalloc = 0;
-			count_sleep = 0;
-			totaltime_sleep = 0;
+			count_sleep_recv = 0;
+			totaltime_sleep_recv = 0;
+			count_sleep_insert = 0;
+			totaltime_sleep_insert = 0;
 			timestamp_last = et;
 		}	
 	}
@@ -354,8 +358,8 @@ repoll:
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
 #ifdef DEBUG_RECV_KZALLOC_SLEEP
 			if(debugflag){
-				totaltime_sleep += usec_sleep;
-				++count_sleep;
+				totaltime_sleep_recv += usec_sleep;
+				++count_sleep_recv;
 			}
 #endif
 			usleep_range(usec_sleep, usec_sleep);
@@ -378,8 +382,8 @@ repoll:
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
 #ifdef DEBUG_RECV_KZALLOC_SLEEP
 			if(debugflag){
-				totaltime_sleep += usec_sleep;
-				++count_sleep;
+				totaltime_sleep_insert += usec_sleep;
+				++count_sleep_insert;
 			}
 #endif
 			usleep_range(usec_sleep, usec_sleep);
