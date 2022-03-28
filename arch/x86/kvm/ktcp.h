@@ -27,10 +27,10 @@ struct ktcp_cb;
 typedef uint32_t extent_t;
 
 int ktcp_send(struct ktcp_cb *cb, const char *buffer, size_t length,
-		unsigned long flags, const tx_add_t *tx_add);
+		unsigned long flags, const tx_add_t *tx_add, int debugflag);
 
 int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
-		tx_add_t *tx_add);
+		tx_add_t *tx_add, int debugflag);
 
 int ktcp_connect(const char *host, const char *port, struct ktcp_cb **conn_cb);
 

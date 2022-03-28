@@ -47,8 +47,8 @@ extern bool kvm_dsm_dbg_verbose;
 
 struct kvm_network_ops {
 	int (*send)(kconnection_t *, const char *, size_t, unsigned long,
-			const tx_add_t*);
-	int (*receive)(kconnection_t *, char *, unsigned long, tx_add_t*);
+			const tx_add_t*, int);
+	int (*receive)(kconnection_t *, char *, unsigned long, tx_add_t*, int);
 	int (*connect)(const char *, const char *, kconnection_t **);
 	int (*listen)(const char *, const char *, kconnection_t **);
 	int (*accept)(kconnection_t *, kconnection_t **, unsigned long);

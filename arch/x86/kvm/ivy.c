@@ -33,6 +33,34 @@ enum kvm_dsm_request_type {
 };
 static char* req_desc[3] = {"INV", "READ", "WRITE"};
 
+//data used for performance debug
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
+#define TIME_GAP 5000000
+//#define PAGEFAULT_STAT
+#ifdef PAGEFAULT_STAT
+static uint64_t count_pf_read;
+static uint64_t count_pf_write;
+static uint64_t totaltime_pf_read; //in micro secs
+static uint64_t totaltime_pf_write;//in micro secs
+static uint64_t timestamp_last;
+#endif
+
+//#define DEBUG_FETCH_IN_PAGEFAULT
+#ifdef DEBUG_FETCH_IN_PAGEFAULT
+static uint64_t count_fetch_in_pf;
+static uint64_t totaltime_fetch_in_pf;
+static uint64_t timestamp_last;
+#endif
+
+//#define DEBUG_FETCH
+#ifdef DEBUG_FETCH
+static uint64_t count_send;
+static uint64_t count_receive;
+static uint64_t totaltime_send;
+static uint64_t totaltime_receive;
+static uint64_t timestamp_last;
+#endif
+
 static inline copyset_t *dsm_get_copyset(
 		struct kvm_dsm_memory_slot *slot, hfn_t vfn)
 {
@@ -81,8 +109,12 @@ struct dsm_response {
  * @return: the length of response
  */
 static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
-		const struct dsm_request *req, void *data, struct dsm_response *resp)
+		const struct dsm_request *req, void *data, struct dsm_response *resp, int debugflag)
 {
+	//data used for debugging
+	struct timespec ts;
+	uint64_t st, et;
+
 	kconnection_t **conn_sock;
 	int ret;
 	tx_add_t tx_add = {
@@ -118,18 +150,71 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 			kvm->arch.dsm_id, tx_add.txid, dest_id, req_desc[req->req_type],
 			req->gfn, req->is_smm);
 
-	ret = network_ops.send(*conn_sock, (const char *)req, sizeof(struct
-				dsm_request), 0, &tx_add);
+#ifdef DEBUG_FETCH
+			timestamp(ts,st);
+			++count_send;
+#endif
+	ret = network_ops.send(*conn_sock, (const char *)req, sizeof(struct dsm_request), 0, &tx_add, debugflag);
+#ifdef DEBUG_FETCH
+			timestamp(ts, et);
+			totaltime_send += (et - st);
+			if(et - timestamp_last >= TIME_GAP){
+				printk(KERN_WARNING "DEBUG_FETCH:Time Gap->%8llu us:#send->%8llu:accumulated time in send->%8llu:#receive->%8llu:accumulated time in receive->%8llu", et - timestamp_last,
+																																		  count_send, totaltime_send,
+																																		  count_receive, totaltime_receive);
+				timestamp_last = et;
+				count_send = 0;
+				count_receive = 0;
+				totaltime_send = 0;
+				totaltime_receive = 0;
+			}
+#endif
 	if (ret < 0)
 		goto done;
 
 	retry_cnt = 0;
 	if (req->req_type == DSM_REQ_INVALIDATE) {
-		ret = network_ops.receive(*conn_sock, data, 0, &tx_add);
+#ifdef DEBUG_FETCH
+			timestamp(ts,st);
+			++count_receive;
+#endif
+		ret = network_ops.receive(*conn_sock, data, 0, &tx_add, debugflag);
+#ifdef DEBUG_FETCH
+			timestamp(ts, et);
+			totaltime_receive += (et - st);
+			if(et - timestamp_last >= TIME_GAP){
+				printk(KERN_WARNING "DEBUG_FETCH:Time Gap->%8llu us:#send->%8llu:accumulated time in send->%8llu:#receive->%8llu:accumulated time in receive->%8llu", et - timestamp_last,
+																																		  count_send, totaltime_send,
+																																		  count_receive, totaltime_receive);
+				timestamp_last = et;
+				count_send = 0;
+				count_receive = 0;
+				totaltime_send = 0;
+				totaltime_receive = 0;
+			}
+#endif
 	}
 	else {
 retry:
-		ret = network_ops.receive(*conn_sock, data, SOCK_NONBLOCK, &tx_add);
+#ifdef DEBUG_FETCH
+			timestamp(ts,st);
+			++count_receive;
+#endif
+		ret = network_ops.receive(*conn_sock, data, SOCK_NONBLOCK, &tx_add, debugflag);
+#ifdef DEBUG_FETCH
+			timestamp(ts, et);
+			totaltime_receive += (et - st);
+			if(et - timestamp_last >= TIME_GAP){
+				printk(KERN_WARNING "DEBUG_FETCH:Time Gap->%8llu us:#send->%8llu:accumulated time in send->%8llu:#receive->%8llu:accumulated time in receive->%8llu", et - timestamp_last,
+																																		  count_send, totaltime_send,
+																																		  count_receive, totaltime_receive);
+				timestamp_last = et;
+				count_send = 0;
+				count_receive = 0;
+				totaltime_send = 0;
+				totaltime_receive = 0;
+			}
+#endif
 		if (ret == -EAGAIN) {
 			retry_cnt++;
 			if (retry_cnt > 100000) {
@@ -183,7 +268,7 @@ static int kvm_dsm_invalidate(struct kvm *kvm, gfn_t gfn, bool is_smm,
 		/* Santiy check on copyset consistency. */
 		BUG_ON(holder >= kvm->arch.cluster_iplist_len);
 
-		ret = kvm_dsm_fetch(kvm, holder, false, &req, &r, &resp);
+		ret = kvm_dsm_fetch(kvm, holder, false, &req, &r, &resp, 1);
 		if (ret < 0)
 			return ret;
 	}
@@ -229,7 +314,7 @@ static int dsm_handle_invalidate_req(struct kvm *kvm, kconnection_t *conn_sock,
 	kvm_dsm_apply_access_right(kvm, slot, vfn, DSM_INVALID);
 	dsm_set_prob_owner(slot, vfn, req->msg_sender);
 	dsm_clear_copyset(slot, vfn);
-	ret = network_ops.send(conn_sock, &r, 1, 0, tx_add);
+	ret = network_ops.send(conn_sock, &r, 1, 0, tx_add, 0);
 
 	dsm_unlock_fast_path(slot, vfn, true);
 
@@ -292,7 +377,7 @@ static int dsm_handle_write_req(struct kvm *kvm, kconnection_t *conn_sock,
 			.version = req->version,
 		};
 		owner = dsm_get_prob_owner(slot, vfn);
-		ret = length = kvm_dsm_fetch(kvm, owner, true, &new_req, page, &resp);
+		ret = length = kvm_dsm_fetch(kvm, owner, true, &new_req, page, &resp, 0);
 		if (ret < 0)
 			return ret;
 
@@ -313,7 +398,7 @@ static int dsm_handle_write_req(struct kvm *kvm, kconnection_t *conn_sock,
 
 	tx_add->inv_copyset = resp.inv_copyset;
 	tx_add->version = resp.version;
-	ret = network_ops.send(conn_sock, page, length, 0, tx_add);
+	ret = network_ops.send(conn_sock, page, length, 0, tx_add, 0);
 	if (ret < 0)
 		return ret;
 	dsm_debug_v("kvm[%d] sent page[%llu,%d] to kvm[%d] length %d hash: 0x%x\n",
@@ -401,7 +486,7 @@ static int dsm_handle_read_req(struct kvm *kvm, kconnection_t *conn_sock,
 			.version = req->version,
 		};
 		owner = dsm_get_prob_owner(slot, vfn);
-		ret = length = kvm_dsm_fetch(kvm, owner, true, &new_req, page, &resp);
+		ret = length = kvm_dsm_fetch(kvm, owner, true, &new_req, page, &resp, 0);
 		if (ret < 0)
 			goto out;
 		BUG_ON(dsm_is_readable(slot, vfn) && !(test_bit(kvm->arch.dsm_id,
@@ -420,7 +505,7 @@ static int dsm_handle_read_req(struct kvm *kvm, kconnection_t *conn_sock,
 
 	tx_add->inv_copyset = resp.inv_copyset;
 	tx_add->version = resp.version;
-	ret = network_ops.send(conn_sock, page, length, 0, tx_add);
+	ret = network_ops.send(conn_sock, page, length, 0, tx_add, 0);
 	if (ret < 0)
 		goto out;
 	dsm_debug_v("kvm[%d] sent page[%llu,%d] to kvm[%d] length %d hash: 0x%x\n",
@@ -465,7 +550,7 @@ int ivy_kvm_dsm_handle_req(void *data)
 			goto out;
 		}
 
-		len = network_ops.receive(conn_sock, (char*)&req, 0, &tx_add);
+		len = network_ops.receive(conn_sock, (char*)&req, 0, &tx_add, 0);
 		BUG_ON(len > 0 && len != sizeof(struct dsm_request));
 
 		if (len <= 0) {
@@ -658,6 +743,10 @@ int ivy_kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 	struct dsm_response resp;
 	int owner;
 
+	//data used for performace debugging
+	struct timespec ts;
+	uint64_t st, et;
+
 	ret = 0;
 	vfn = __gfn_to_vfn_memslot(memslot, gfn);
 	slot = gfn_to_hvaslot(kvm, memslot, gfn);
@@ -684,7 +773,13 @@ int ivy_kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 	 * Or this node will be owner after #PF, it still issue invalidate by
 	 * receiving copyset from old owner.
 	 */
+#ifdef PAGEFAULT_STAT
+	timestamp(ts, st);
+#endif
 	if (write) {
+#ifdef PAGEFAULT_STAT
+		++count_pf_write;
+#endif
 		struct dsm_request req = {
 			.req_type = DSM_REQ_WRITE,
 			.requester = kvm->arch.dsm_id,
@@ -719,8 +814,25 @@ int ivy_kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 			 * or not. If not, forward the request to next probOwner until find
 			 * the true owner.
 			 */
+#ifdef DEBUG_FETCH_IN_PAGEFAULT
+			timestamp(ts,st);
+			++count_fetch_in_pf;
+#endif
 			ret = resp_len = kvm_dsm_fetch(kvm, owner, false, &req, page,
-					&resp);
+					&resp, 1);
+#ifdef DEBUG_FETCH_IN_PAGEFAULT
+			timestamp(ts, et);
+			totaltime_fetch_in_pf += (et - st);
+			if(et - timestamp_last >= TIME_GAP){
+				printk(KERN_WARNING "DEBUG_FETCH_IN_PAGEFAULT:Time Gap->%8llu us:#kvm_dsm_fetch->%8llu:accumulated time in fetch->%8llu", et - timestamp_last,
+																																		  count_fetch_in_pf,
+																																		  totaltime_fetch_in_pf);
+				timestamp_last = et;
+				count_fetch_in_pf = 0;
+				totaltime_fetch_in_pf = 0;
+			}
+#endif
+
 			if (ret < 0)
 				goto out_error;
 			ret = kvm_dsm_invalidate(kvm, gfn, is_smm, slot, vfn,
@@ -749,6 +861,9 @@ int ivy_kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 		dsm_change_state(slot, vfn, DSM_OWNER | DSM_MODIFIED);
 		ret = ACC_ALL;
 	} else {
+#ifdef PAGEFAULT_STAT
+		++count_pf_read;
+#endif
 		struct dsm_request req = {
 			.req_type = DSM_REQ_READ,
 			.requester = kvm->arch.dsm_id,
@@ -773,7 +888,23 @@ int ivy_kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 			goto out;
 		}
 		/* Ask the probOwner */
-		ret = resp_len = kvm_dsm_fetch(kvm, owner, false, &req, page, &resp);
+#ifdef DEBUG_FETCH_IN_PAGEFAULT
+			timestamp(ts,st);
+			++count_fetch_in_pf;
+#endif
+		ret = resp_len = kvm_dsm_fetch(kvm, owner, false, &req, page, &resp, 1);
+#ifdef DEBUG_FETCH_IN_PAGEFAULT
+			timestamp(ts, et);
+			totaltime_fetch_in_pf += (et - st);
+			if(et - timestamp_last >= TIME_GAP){
+				printk(KERN_WARNING "DEBUG_FETCH_IN_PAGEFAULT:Time Gap->%8llu us:#kvm_dsm_fetch->%8llu:accumulated time in fetch->%8llu", et - timestamp_last,
+																																		  count_fetch_in_pf,
+																																		  totaltime_fetch_in_pf);
+				timestamp_last = et;
+				count_fetch_in_pf = 0;
+				totaltime_fetch_in_pf = 0;
+			}
+#endif
 		if (ret < 0)
 			goto out_error;
 
@@ -798,6 +929,27 @@ int ivy_kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 	}
 
 out:
+#ifdef PAGEFAULT_STAT
+	timestamp(ts,et);
+	if(write){
+		totaltime_pf_write += (et - st);	
+	}else{
+		totaltime_pf_read += (et - st);
+	}
+
+	//check timestamp_last, if it has been more than 5 secs, report data and reset all data
+	if (et - timestamp_last >= 5000000){
+		//output format: time elapsed since last report:#pagefault_read:totaltime_pagefault_read:#pagefault_write:totaltime_write:#ktcp_send:totaltime_ktcp_send:#ktcp_receive:totaltime_ktcp_receive
+		printk(KERN_WARNING "PAGE_FAULT STATISTICS:time elapsed since last report->%llu:#read_pagefault->%llu:accumulated time for read_pagefault->%llu us:#write_pagefault->%llu:accumulated time for write_pagefault->%llu us", et - timestamp_last, 
+																							   count_pf_read, totaltime_pf_read, 
+																							   count_pf_write, totaltime_pf_write);
+		timestamp_last = et;
+		count_pf_read = 0;
+		count_pf_write = 0;
+		totaltime_pf_read = 0;
+		totaltime_pf_write = 0;
+	}
+#endif
 	kvm_dsm_pf_trace(kvm, slot, vfn, write, resp_len);
 	kfree(page);
 	return ret;

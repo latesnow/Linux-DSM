@@ -36,6 +36,29 @@
 
 #define KTCP_RECV_BUF_SIZE 32
 
+//#define PAGEFAULT_STAT
+//#define BANDWIDTH_STAT
+
+//data used for performance debugging
+#define TIME_GAP 5000000
+#if defined(BANDWIDTH_STAT)
+static unsigned long long count_ktcp_send;
+static unsigned long long count_ktcp_receive;
+static unsigned long long totaltime_ktcp_send;
+static unsigned long long totaltime_ktcp_receive;
+static unsigned long long timestamp_last;
+#endif
+
+//#define DEBUG_RECV_KZALLOC_SLEEP
+#ifdef DEBUG_RECV_KZALLOC_SLEEP
+static uint64_t count_kzalloc;
+static uint64_t totaltime_kzalloc;
+static uint64_t count_sleep;
+static uint64_t totaltime_sleep;
+static uint64_t timestamp_last;
+#define REPORT_STAT {printk(KERN_WARNING "RECV_KZALLOC_SLEEP STAT:Time Gap->%8llu:#kzalloc->%8llu:TotalTime in kzalloc->%8llu us:#sleep->%8llu:TotalTime slept->%8llu", et - timestamp_last, count_kzalloc, totaltime_kzalloc, count_sleep, totaltime_sleep);}
+#endif
+
 struct ktcp_hdr {
 	size_t length;
 	tx_add_t tx_add;
@@ -56,6 +79,23 @@ struct ktcp_cb
 };
 
 #define KTCP_BUFFER_SIZE (sizeof(struct ktcp_hdr) + PAGE_SIZE)
+
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
+#if defined(PAGEFAULT_STAT) || defined(BANDWIDTH_STAT)
+#define REPORT_STAT {\
+	if(et - timestamp_last > 5000000){\
+		printk(KERN_WARNING "KTCP SEND & RECEIVE STATISTICS:Time Gap->%9llu:#Send->%9llu:TotalTime in Send->%9llu:#Receive->%9llu:TotalTime in Receive->%9llu:TotalBandwidth Used->%9llu", et - timestamp_last,\
+			                                                                            		count_ktcp_send, totaltime_ktcp_send,\
+																								count_ktcp_receive, totaltime_ktcp_receive,\
+																								((count_ktcp_send + count_ktcp_receive) * KTCP_BUFFER_SIZE) / (1024ULL * 1024));\
+		timestamp_last = et;\
+		count_ktcp_send = 0;\
+		count_ktcp_receive = 0;\
+		totaltime_ktcp_send = 0;\
+		totaltime_ktcp_receive = 0;\
+	}\
+}
+#endif
 
 static int __ktcp_send(struct socket *sock, const char *buffer, size_t length,
 		unsigned long flags)
@@ -101,14 +141,26 @@ repeat_send:
 }
 
 int ktcp_send(struct ktcp_cb *cb, const char *buffer, size_t length,
-		unsigned long flags, const tx_add_t *tx_add)
+		unsigned long flags, const tx_add_t *tx_add, int debugflag)
 {
 	int ret;
 	mm_segment_t oldmm;
 	struct ktcp_hdr hdr;
 	char *local_buffer;
 
+	struct timespec ts;
+	uint64_t st, et;
+
 	mutex_lock(&cb->slock);
+#if defined(PAGEFAULT_STAT)
+	if(debugflag){
+#endif
+#if defined(BANDWIDTH_STAT)
+		timestamp(ts,st);
+#endif
+#if defined(PAGEFAULT_STAT)
+	}
+#endif
 	hdr.tx_add = *tx_add;
 	hdr.length = sizeof(hdr) + length;
 
@@ -123,11 +175,26 @@ int ktcp_send(struct ktcp_cb *cb, const char *buffer, size_t length,
 	// Get current address access limitdo
 	oldmm = get_fs();
 	set_fs(KERNEL_DS);
+
+
 	ret = __ktcp_send(cb->socket, local_buffer, KTCP_BUFFER_SIZE, flags);
 	
+
 	// Retrieve address access limit
 	set_fs(oldmm);
 	kfree(local_buffer);
+#if defined(PAGEFAULT_STAT)
+	if(debugflag){
+#endif
+#if defined(BANDWIDTH_STAT)
+		timestamp(ts, et);
+		totaltime_ktcp_send += (et - st);
+		++count_ktcp_send;
+		REPORT_STAT
+#endif
+#if defined(PAGEFAULT_STAT)
+	}
+#endif
 	mutex_unlock(&cb->slock);
 	return ret < 0 ? ret : length;
 }
@@ -218,7 +285,7 @@ read_again:
 	}
 	len += ret;
 	if (len != expected_size) {
-		printk(KERN_WARNING "ktcp_receive receive %d bytes which expected_size=%lu bytes, read again", len, expected_size);
+		//printk(KERN_WARNING "ktcp_receive receive %d bytes which expected_size=%lu bytes, read again", len, expected_size);
 		goto read_again;
 	}
 
@@ -226,7 +293,7 @@ read_again:
 }
 
 int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
-		tx_add_t *tx_add)
+		tx_add_t *tx_add, int debugflag)
 {
 	struct ktcp_hdr hdr;
 	int ret;
@@ -234,16 +301,48 @@ int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
 	uint32_t usec_sleep = 0;
 	char *local_buffer;
 
+	struct timespec ts;
+	uint64_t st, et;
+
 	BUG_ON(cb == NULL || buffer == NULL || tx_add == NULL);
 
 	mutex_lock(&cb->rlock);
+#if defined(PAGEFAULT_STAT)
+	if(debugflag){
+#endif
+#if defined(BANDWIDTH_STAT)
+		timestamp(ts, st);
+#endif
+#if defined(PAGEFAULT_STAT)
+	}
+#endif
 repoll:
 	if (search_recv_buf(cb, tx_add->txid, &msg)){
 		ret = build_ktcp_recv_output(msg, buffer, tx_add);
 		mutex_unlock(&cb->rlock);
 		return ret;
 	}
+#ifdef DEBUG_RECV_KZALLOC_SLEEP
+	if(debugflag){
+		timestamp(ts, st);
+		++count_kzalloc;
+	}
+#endif
 	local_buffer = kzalloc(KTCP_BUFFER_SIZE, GFP_KERNEL);
+#ifdef DEBUG_RECV_KZALLOC_SLEEP
+	if(debugflag){
+		timestamp(ts, et);
+		totaltime_kzalloc += (et - st);
+		if(et - timestamp_last > TIME_GAP){
+			REPORT_STAT
+			count_kzalloc = 0;
+			totaltime_kzalloc = 0;
+			count_sleep = 0;
+			totaltime_sleep = 0;
+			timestamp_last = et;
+		}	
+	}
+#endif
 	if (!local_buffer) {
 		ret = -ENOMEM;
 		goto out;
@@ -253,6 +352,12 @@ repoll:
 		if (ret == -EAGAIN) {
 			mutex_unlock(&cb->rlock);
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
+#ifdef DEBUG_RECV_KZALLOC_SLEEP
+			if(debugflag){
+				totaltime_sleep += usec_sleep;
+				++count_sleep;
+			}
+#endif
 			usleep_range(usec_sleep, usec_sleep);
 			mutex_lock(&cb->rlock);
 			kfree(local_buffer);
@@ -271,6 +376,12 @@ repoll:
 		while(!insert_into_recv_buf(cb, msg)){
 			mutex_unlock(&cb->rlock);
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
+#ifdef DEBUG_RECV_KZALLOC_SLEEP
+			if(debugflag){
+				totaltime_sleep += usec_sleep;
+				++count_sleep;
+			}
+#endif
 			usleep_range(usec_sleep, usec_sleep);
 			mutex_lock(&cb->rlock);
 		}
@@ -281,6 +392,18 @@ repoll:
 		build_ktcp_recv_output(msg, buffer, tx_add);
 	}
 out:
+#if defined(PAGEFAULT_STAT)
+	if(debugflag){
+#endif
+#if defined(BANDWIDTH_STAT)
+		timestamp(ts, et);
+		totaltime_ktcp_receive += (et - st);
+		++count_ktcp_receive;
+		REPORT_STAT
+#endif
+#if defined(PAGEFAULT_STAT)
+	}
+#endif
 	mutex_unlock(&cb->rlock);
 	return ret < 0 ? ret : hdr.length - sizeof(struct ktcp_hdr);
 }
