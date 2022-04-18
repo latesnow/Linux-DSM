@@ -52,7 +52,7 @@ static uint64_t totaltime_fetch_in_pf;
 static uint64_t timestamp_last;
 #endif
 
-//#define DEBUG_FETCH
+#define DEBUG_FETCH
 #ifdef DEBUG_FETCH
 static uint64_t count_send;
 static uint64_t count_receive;

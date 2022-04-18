@@ -40,4 +40,5 @@ int ktcp_accept(struct ktcp_cb *listen_cb, struct ktcp_cb **accept_cb, unsigned 
 
 int ktcp_release(struct ktcp_cb *conn_cb);
 
+int ktcp_msg_receiver(void *data);//CL: the only msg receiver for a given connection
 #endif /* __KVM_X86_KTCP_H */

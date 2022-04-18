@@ -87,9 +87,9 @@ struct ktcp_cb
 #define REPORT_STAT {\
 	if(et - timestamp_last > 5000000){\
 		printk(KERN_WARNING "KTCP SEND & RECEIVE STATISTICS:Time Gap->%9llu:#Send->%9llu:TotalTime in Send->%9llu:#Receive->%9llu:TotalTime in Receive->%9llu:TotalBandwidth Used->%9llu", et - timestamp_last,\
-			                                                                            		count_ktcp_send, totaltime_ktcp_send,\
-																								count_ktcp_receive, totaltime_ktcp_receive,\
-																								((count_ktcp_send + count_ktcp_receive) * KTCP_BUFFER_SIZE) / (1024ULL * 1024));\
+				count_ktcp_send, totaltime_ktcp_send,\
+				count_ktcp_receive, totaltime_ktcp_receive,\
+				((count_ktcp_send + count_ktcp_receive) * KTCP_BUFFER_SIZE) / (1024ULL * 1024));\
 		timestamp_last = et;\
 		count_ktcp_send = 0;\
 		count_ktcp_receive = 0;\
@@ -180,7 +180,7 @@ int ktcp_send(struct ktcp_cb *cb, const char *buffer, size_t length,
 
 
 	ret = __ktcp_send(cb->socket, local_buffer, KTCP_BUFFER_SIZE, flags);
-	
+
 
 	// Retrieve address access limit
 	set_fs(oldmm);
@@ -201,17 +201,24 @@ int ktcp_send(struct ktcp_cb *cb, const char *buffer, size_t length,
 	return ret < 0 ? ret : length;
 }
 
-static bool search_recv_buf(struct ktcp_cb *cb, uint16_t txid, ktcp_msg_t *msg)
+static bool search_recv_buf(struct ktcp_cb *cb, uint16_t txid, ktcp_msg_t *msg, struct mutex *rlock)
 {
 	int i;
 
 	for(i = 0; i < KTCP_RECV_BUF_SIZE; ++i)
 	{
 		if (cb->recv_trans_buf[i].txid == txid && cb->recv_trans_buf[i].recv_buf != NULL) {
+			mutex_lock(rlock);
+			if(cb->recv_trans_buf[i].txid == txid && cb->recv_trans_buf[i].recv_buf != NULL){
 				*msg = cb->recv_trans_buf[i];
 				cb->recv_trans_buf[i].txid = 0;
 				cb->recv_trans_buf[i].recv_buf = NULL;
-				return true;
+			mutex_unlock(rlock);
+			return true;
+			}
+			else{
+				mutex_unlock(rlock);
+			}
 		}
 	}
 	return false;
@@ -224,8 +231,8 @@ static bool insert_into_recv_buf(struct ktcp_cb *cb, ktcp_msg_t msg)
 	for(i = 0; i < KTCP_RECV_BUF_SIZE; ++i)
 	{ 
 		if (cb->recv_trans_buf[i].txid == 0 && cb->recv_trans_buf[i].recv_buf == NULL) {
-				cb->recv_trans_buf[i] = msg;
-				return true;
+			cb->recv_trans_buf[i] = msg;
+			return true;
 		}
 	}
 
@@ -250,7 +257,7 @@ static int __ktcp_receive(struct socket *sock, char *buffer, size_t expected_siz
 	struct kvec vec;
 	int ret;
 	int len = 0;
-	
+
 	struct msghdr msg = {
 		.msg_name    = 0,
 		.msg_namelen = 0,
@@ -294,6 +301,60 @@ read_again:
 	return len;
 }
 
+//this function is used by connection worker thread, which put any msg it reads into the global buffer.
+int ktcp_msg_receiver(void *data)
+{
+	struct ktcp_hdr hdr;
+	int ret;
+	ktcp_msg_t msg;
+	uint32_t usec_sleep = 0;
+	char *local_buffer;
+	struct ktcp_cb *cb;
+	struct dsm_conn *conn;
+	uint32_t retry_cnt;
+
+
+	BUG_ON(data);
+	cb = (struct ktcp_cb*) data;
+
+	usec_sleep = 1;
+	retry_cnt = 0;
+	//loop begins here
+	while(1){
+		/*
+		retry_cnt += 1;
+		if(retry_cnt == 100){
+			retry_cnt = 0;
+			usleep_range(usec_sleep, usec_sleep);
+		}
+		*/
+		local_buffer = kzalloc(KTCP_BUFFER_SIZE, GFP_KERNEL);
+		if (!local_buffer) {
+			ret = -ENOMEM;
+			break;
+		}
+		ret = __ktcp_receive(cb->socket, local_buffer, KTCP_BUFFER_SIZE, 0);//?
+		if (ret < 0) {
+			if (ret == -EAGAIN) {
+				kfree(local_buffer);
+				continue;
+			}
+			kfree(local_buffer);
+			printk(KERN_ERR "%s: __ktcp_receive error, ret %d\n",
+					__func__, ret);
+			break;
+		}
+		memcpy(&hdr, local_buffer, sizeof(hdr));
+		msg.recv_buf = local_buffer;
+		msg.txid = hdr.tx_add.txid;
+		while(!insert_into_recv_buf(cb, msg)){}
+		printk(KERN_WARNING "msg inserted");
+	}
+out:
+	return ret;
+}
+
+/*
 int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
 		tx_add_t *tx_add, int debugflag)
 {
@@ -337,7 +398,7 @@ repoll:
 		totaltime_kzalloc += (et - st);
 		if(et - timestamp_last > TIME_GAP){
 			REPORT_STAT
-			count_kzalloc = 0;
+				count_kzalloc = 0;
 			totaltime_kzalloc = 0;
 			count_sleep_recv = 0;
 			totaltime_sleep_recv = 0;
@@ -411,6 +472,35 @@ out:
 	mutex_unlock(&cb->rlock);
 	return ret < 0 ? ret : hdr.length - sizeof(struct ktcp_hdr);
 }
+*/
+
+int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
+		tx_add_t *tx_add, int debugflag)
+{
+	struct ktcp_hdr hdr;
+	int ret;
+	ktcp_msg_t msg;
+	char *local_buffer;
+	uint32_t usec_sleep;
+	uint32_t retry_cnt;
+
+	BUG_ON(cb == NULL || buffer == NULL || tx_add == NULL);
+	usec_sleep = 0;
+	retry_cnt = 0;
+
+	while(!search_recv_buf(cb, tx_add->txid, &msg, &cb->rlock)){
+		/*
+		retry_cnt += 1;
+		if(retry_cnt == 100){
+			retry_cnt = 0;
+			usleep_range(usec_sleep, usec_sleep);
+		}
+		*/
+	}
+	ret = build_ktcp_recv_output(msg, buffer, tx_add);
+	printk(KERN_WARNING "msg retrived");
+	return ret;
+}
 
 static int ktcp_create_cb(struct ktcp_cb **cbp)
 {
@@ -420,7 +510,7 @@ static int ktcp_create_cb(struct ktcp_cb **cbp)
 	cb = kzalloc(sizeof(*cb), GFP_KERNEL);
 	if (!cb)
 		return -ENOMEM;
-	
+
 	for(i = 0; i < KTCP_RECV_BUF_SIZE; ++i){
 		cb->recv_trans_buf[i].txid = 0;
 		cb->recv_trans_buf[i].recv_buf = NULL;

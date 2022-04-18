@@ -62,12 +62,12 @@ struct dsm_address {
 	char port[8];
 };
 
-#define NDSM_CONN_THREADS 8
+#define NDSM_CONN_THREADS 5
 struct dsm_conn {
 	struct list_head link;
 	struct kvm *kvm;
 	kconnection_t *sock;
-	struct task_struct *threads[NDSM_CONN_THREADS];
+	struct task_struct *threads[NDSM_CONN_THREADS + 1]; //CL: add extra thread to recv msgs only, other threads only search and read from the msg_buffer
 };
 
 /* mmu.c */
