@@ -62,7 +62,7 @@ struct dsm_address {
 	char port[8];
 };
 
-#define NDSM_CONN_THREADS 5
+#define NDSM_CONN_THREADS 1
 struct dsm_conn {
 	struct list_head link;
 	struct kvm *kvm;
