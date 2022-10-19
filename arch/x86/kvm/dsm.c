@@ -473,14 +473,6 @@ static int kvm_dsm_threadfn(void *data)
 		conn->kvm = kvm;
 		conn->sock = accept_sock;
 
-		//create the msg receiver first
-		thread = kthread_run(kvm_dsm_msg_receiver, (void*) conn->sock, "dsm-conn/%d,msg_receiver", kvm->arch.dsm_id);
-		if (IS_ERR(thread)) {
-			printk(KERN_ERR "kvm-dsm: failed to start kernel thread for dsm connection\n");
-			ret = PTR_ERR(thread);
-			goto out_accept_sock;
-		}
-		conn->threads[NDSM_CONN_THREADS -1] = thread;
 		for (i = 0; i < NDSM_CONN_THREADS -1; i++) {
 			/*
 			 * The count is somewhat meaningless since it doesn't contain
@@ -495,6 +487,14 @@ static int kvm_dsm_threadfn(void *data)
 			}
 			conn->threads[i] = thread;
 		}
+		//create the msg receiver first
+		thread = kthread_run(kvm_dsm_msg_receiver, (void*) conn, "dsm-conn/%d,msg_receiver", kvm->arch.dsm_id);
+		if (IS_ERR(thread)) {
+			printk(KERN_ERR "kvm-dsm: failed to start kernel thread for dsm connection\n");
+			ret = PTR_ERR(thread);
+			goto out_accept_sock;
+		}
+		conn->threads[NDSM_CONN_THREADS -1] = thread;
 		list_add_tail(&conn->link, &conn_list);
 	}
 
