@@ -34,9 +34,12 @@
 
 #include "ktcp.h"
 
-#define KTCP_DEBUG(format, args...) printk(KERN_WARNING format, ##args)
-#define KR_DEBUG(format, args...) printk(KERN_WARNING "receive:"format, ##args)
-#define HANDLER_DEBUG(format, args...) printk(KERN_WARNING "handler:"format, ##args)
+//#define KTCP_DEBUG(format, args...) printk(KERN_WARNING format, ##args)
+#define KTCP_DEBUG(format, args...) 
+//#define KR_DEBUG(format, args...) printk(KERN_WARNING "receive:"format, ##args)
+#define KR_DEBUG(format, args...) 
+//#define HANDLER_DEBUG(format, args...) printk(KERN_WARNING "handler:"format, ##args)
+#define HANDLER_DEBUG(format, args...) 
 
 #define KTCP_RECV_BUF_SIZE 32
 
