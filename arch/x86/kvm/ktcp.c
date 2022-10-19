@@ -352,7 +352,7 @@ int kvm_dsm_msg_receiver(void *data)
 			//mutex_unlock(&cb->rlock);
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
 			//usleep_range(usec_sleep, usec_sleep);
-			mutex_lock(&cb->rlock);
+			//mutex_lock(&cb->rlock);
 		}
 		KTCP_DEBUG("ktcp_receiver:inserted msg %d\n", msg.txid);
 		//mutex_unlock(&cb->rlock);
@@ -442,7 +442,7 @@ int ktcp_receive_with_receiver(struct ktcp_cb *cb, char *buffer,
 	int ret;
 
 repoll:
-	mutex_lock(&cb->rlock);
+	//mutex_lock(&cb->rlock);
 	if (search_recv_buf_receiver(cb, tx_add->txid, &msg)){
 		ret = build_ktcp_recv_output(msg, buffer, tx_add);
 		mutex_unlock(&cb->rlock);
@@ -450,7 +450,7 @@ repoll:
 		return ret;
 	}
 	HANDLER_DEBUG("found nothing in buffer, sleep\n");
-	mutex_unlock(&cb->rlock);
+	//mutex_unlock(&cb->rlock);
 	//usleep_range(500, 1000);
 	goto repoll;
 }
