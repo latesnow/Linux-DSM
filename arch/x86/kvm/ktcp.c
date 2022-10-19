@@ -34,6 +34,10 @@
 
 #include "ktcp.h"
 
+#define KTCP_DEBUG(format, args...) printk(KERN_WARNING format, ##args)
+#define KR_DEBUG(format, args...) printk(KERN_WARNING "receive:"format, ##args)
+#define HANDLER_DEBUG(format, args...) printk(KERN_WARNING "handler:"format, ##args)
+
 #define KTCP_RECV_BUF_SIZE 32
 
 struct ktcp_hdr {
@@ -148,6 +152,28 @@ static bool search_recv_buf(struct ktcp_cb *cb, uint16_t txid, ktcp_msg_t *msg)
 	return false;
 }
 
+/*
+This is used by message handler, since message receiver will put whatever it
+gets into the msg buffer, there is no need to match txid. Everything inside 
+this buffer is a remote request, thus any handler can pick it.
+*/
+static bool search_recv_buf_receiver(struct ktcp_cb *cb, uint16_t txid, ktcp_msg_t *msg)
+{
+	int i;
+
+	for(i = 0; i < KTCP_RECV_BUF_SIZE; ++i)
+	{
+		HANDLER_DEBUG("searching at %d, txid = %d", i, cb->recv_trans_buf[i].txid);
+		if (cb->recv_trans_buf[i].txid != 0 && cb->recv_trans_buf[i].recv_buf != NULL) {
+				*msg = cb->recv_trans_buf[i];
+				cb->recv_trans_buf[i].txid = 0;
+				cb->recv_trans_buf[i].recv_buf = NULL;
+				return true;
+		}
+	}
+	return false;
+}
+
 static bool insert_into_recv_buf(struct ktcp_cb *cb, ktcp_msg_t msg)
 {
 	int i;
@@ -218,15 +244,103 @@ read_again:
 	}
 	len += ret;
 	if (len != expected_size) {
-		printk(KERN_WARNING "ktcp_receive receive %d bytes which expected_size=%lu bytes, read again", len, expected_size);
+		//printk(KERN_WARNING "ktcp_receive receive %d bytes which expected_size=%lu bytes, read again", len, expected_size);
 		goto read_again;
 	}
 
 	return len;
 }
+/*
+message receiver function
+*/
+int kvm_dsm_msg_receiver(void *data)
+{
+	/*
+	while(1){
+		printk(KERN_WARNING "---------------------greetings from message receiver---------------------\n");
+		usleep_range(100000, 100000);
+	}
+	return 0;
+	*/
+	struct ktcp_hdr hdr;
+	int ret;
+	ktcp_msg_t msg;
+	uint32_t usec_sleep;
+	char *local_buffer;
+	struct ktcp_cb *cb;
+	struct dsm_conn *conn;
+	uint32_t retry_cnt;
+
+
+	BUG_ON(data == NULL);
+	cb = (struct ktcp_cb*) data;
+
+	usec_sleep = 1;
+	retry_cnt = 0;
+	//loop begins here
+	printk(KERN_WARNING "--------------------------------receiver launched!--------------------------------\n");
+	while(1){
+		//KTCP_DEBUG("receiver:iteration begin, trying to lock rlock\n");
+		//mutex_lock(&cb->rlock);	
+		//KTCP_DEBUG("receiver:got rlock\n");
+		//KTCP_DEBUG("ktcp_receiver:trying to allocate local_buffer\n");
+		local_buffer = kzalloc(KTCP_BUFFER_SIZE, GFP_KERNEL);
+		//KTCP_DEBUG("ktcp_receiver: return from kzalloc\n");
+		if (!local_buffer) {
+			printk(KERN_WARNING "ktcp_receiver: kzalloc failed\n");
+			ret = -ENOMEM;
+			//mutex_unlock(&cb->rlock);
+			break;
+		}
+		//KTCP_DEBUG("ktcp_receiver:calling __ktcp_receive\n");
+		ret = __ktcp_receive(cb->socket, local_buffer, KTCP_BUFFER_SIZE, 0);//?
+		//KTCP_DEBUG("ktcp_receiver:__ktcp_receive returned\n");
+		if (ret < 0) {
+			if (ret == -EAGAIN) {
+				KTCP_DEBUG("ktcp_receiver: EAGAIN\n");
+				//mutex_unlock(&cb->rlock);
+				usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
+				usleep_range(usec_sleep, usec_sleep);
+				kfree(local_buffer);
+				continue;
+			}
+			kfree(local_buffer);
+			printk(KERN_ERR "%s: __ktcp_receive error, ret %d\n",
+					__func__, ret);
+			//mutex_unlock(&cb->rlock);
+			break;
+		}
+		usec_sleep = 0;
+		memcpy(&hdr, local_buffer, sizeof(hdr));
+		msg.recv_buf = local_buffer;
+		msg.txid = hdr.tx_add.txid;
+		//printk(KERN_WARNING "ktcp_receiver:got msg %d %d\n", hdr.tx_add.txid, hdr.length - sizeof(struct ktcp_hdr));
+		mutex_lock(&cb->rlock);
+		while(!insert_into_recv_buf(cb, msg)){
+			printk(KERN_WARNING "ktcp_receiver:failed to insert msg %d\n", msg.txid);
+			mutex_unlock(&cb->rlock);
+			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
+			usleep_range(usec_sleep, usec_sleep);
+			mutex_lock(&cb->rlock);
+		}
+		KTCP_DEBUG("ktcp_receiver:inserted msg %d\n", msg.txid);
+		mutex_unlock(&cb->rlock);
+		usleep_range(100,1000);
+		KTCP_DEBUG("receiver: woke up from sleep, entering next iteration\n");
+	}
+	//printk(KERN_WARNING "receiver is leaving\n");
+	return ret;
+}
+
+/*
+mode = 
+0: no receiver, do a regular receive
+1: with receiver, only poll the message buffer
+*/
+int ktcp_receive_with_receiver(struct ktcp_cb *cb, char *buffer, tx_add_t *tx_add);
 
 int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
-		tx_add_t *tx_add)
+		tx_add_t *tx_add, int mode)
 {
 	struct ktcp_hdr hdr;
 	int ret;
@@ -235,6 +349,10 @@ int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
 	char *local_buffer;
 
 	BUG_ON(cb == NULL || buffer == NULL || tx_add == NULL);
+
+	if(mode == 1){
+		return ktcp_receive_with_receiver(cb, buffer, tx_add);
+	}
 
 	mutex_lock(&cb->rlock);
 repoll:
@@ -283,6 +401,27 @@ repoll:
 out:
 	mutex_unlock(&cb->rlock);
 	return ret < 0 ? ret : hdr.length - sizeof(struct ktcp_hdr);
+}
+
+
+int ktcp_receive_with_receiver(struct ktcp_cb *cb, char *buffer, 
+		tx_add_t *tx_add)
+{
+	ktcp_msg_t msg;
+	int ret;
+
+repoll:
+	mutex_lock(&cb->rlock);
+	if (search_recv_buf_receiver(cb, tx_add->txid, &msg)){
+		ret = build_ktcp_recv_output(msg, buffer, tx_add);
+		mutex_unlock(&cb->rlock);
+		HANDLER_DEBUG("request %d retrieved\n", tx_add->txid);
+		return ret;
+	}
+	HANDLER_DEBUG("found nothing in buffer, sleep\n");
+	mutex_unlock(&cb->rlock);
+	usleep_range(500, 1000);
+	goto repoll;
 }
 
 static int ktcp_create_cb(struct ktcp_cb **cbp)

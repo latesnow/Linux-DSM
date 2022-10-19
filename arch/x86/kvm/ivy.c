@@ -125,11 +125,11 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 
 	retry_cnt = 0;
 	if (req->req_type == DSM_REQ_INVALIDATE) {
-		ret = network_ops.receive(*conn_sock, data, 0, &tx_add);
+		ret = network_ops.receive(*conn_sock, data, 0, &tx_add, 0);
 	}
 	else {
 retry:
-		ret = network_ops.receive(*conn_sock, data, SOCK_NONBLOCK, &tx_add);
+		ret = network_ops.receive(*conn_sock, data, SOCK_NONBLOCK, &tx_add, 0);
 		if (ret == -EAGAIN) {
 			retry_cnt++;
 			if (retry_cnt > 100000) {
@@ -465,7 +465,7 @@ int ivy_kvm_dsm_handle_req(void *data)
 			goto out;
 		}
 
-		len = network_ops.receive(conn_sock, (char*)&req, 0, &tx_add);
+		len = network_ops.receive(conn_sock, (char*)&req, 0, &tx_add, 1);
 		BUG_ON(len > 0 && len != sizeof(struct dsm_request));
 
 		if (len <= 0) {
