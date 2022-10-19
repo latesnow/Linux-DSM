@@ -302,8 +302,8 @@ int kvm_dsm_msg_receiver(void *data)
 			if (ret == -EAGAIN) {
 				KTCP_DEBUG("ktcp_receiver: EAGAIN\n");
 				//mutex_unlock(&cb->rlock);
-				usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
-				usleep_range(usec_sleep, usec_sleep);
+				//usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
+				//usleep_range(usec_sleep, usec_sleep);
 				kfree(local_buffer);
 				continue;
 			}
@@ -323,12 +323,12 @@ int kvm_dsm_msg_receiver(void *data)
 			printk(KERN_WARNING "ktcp_receiver:failed to insert msg %d\n", msg.txid);
 			mutex_unlock(&cb->rlock);
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
-			usleep_range(usec_sleep, usec_sleep);
+			//usleep_range(usec_sleep, usec_sleep);
 			mutex_lock(&cb->rlock);
 		}
 		KTCP_DEBUG("ktcp_receiver:inserted msg %d\n", msg.txid);
 		mutex_unlock(&cb->rlock);
-		usleep_range(100,1000);
+		//usleep_range(100,1000);
 		KTCP_DEBUG("receiver: woke up from sleep, entering next iteration\n");
 	}
 	//printk(KERN_WARNING "receiver is leaving\n");
@@ -423,7 +423,7 @@ repoll:
 	}
 	HANDLER_DEBUG("found nothing in buffer, sleep\n");
 	mutex_unlock(&cb->rlock);
-	usleep_range(500, 1000);
+	//usleep_range(500, 1000);
 	goto repoll;
 }
 
