@@ -168,7 +168,7 @@ static bool search_recv_buf_receiver(struct ktcp_cb *cb, uint16_t txid, ktcp_msg
 
 	for(i = 0; i < KTCP_RECV_BUF_SIZE; ++i)
 	{
-		HANDLER_DEBUG("searching at %d, txid = %d", i, cb->recv_trans_buf[i].txid);
+		//HANDLER_DEBUG("searching at %d, txid = %d", i, cb->recv_trans_buf[i].txid);
 		if (cb->recv_trans_buf[i].txid != 0 && cb->recv_trans_buf[i].recv_buf != NULL && current->pid == cb->delegated_handler[i]) {
 				*msg = cb->recv_trans_buf[i];
 				cb->recv_trans_buf[i].txid = 0;
@@ -347,6 +347,8 @@ int kvm_dsm_msg_receiver(void *data)
 		msg.txid = hdr.tx_add.txid;
 		//printk(KERN_WARNING "ktcp_receiver:got msg %d %d\n", hdr.tx_add.txid, hdr.length - sizeof(struct ktcp_hdr));
 		//mutex_lock(&cb->rlock);
+		if(conn->threads[agent_idx] == NULL) printk(KERN_ERR "thread = NULL!\n");
+		//printk(KERN_WARNING "appoint req %d to thread %d\n", msg.txid, conn->threads[agent_idx]->pid);
 		while(!insert_into_recv_buf_receiver(cb, msg, conn->threads[agent_idx]->pid)){
 			printk(KERN_WARNING "ktcp_receiver:failed to insert msg %d\n", msg.txid);
 			//mutex_unlock(&cb->rlock);
@@ -357,7 +359,7 @@ int kvm_dsm_msg_receiver(void *data)
 		KTCP_DEBUG("ktcp_receiver:inserted msg %d\n", msg.txid);
 		//mutex_unlock(&cb->rlock);
 		//usleep_range(100,1000);
-		KTCP_DEBUG("receiver: woke up from sleep, entering next iteration\n");
+		//KTCP_DEBUG("receiver: woke up from sleep, entering next iteration\n");
 	}
 	//printk(KERN_WARNING "receiver is leaving\n");
 	return ret;
@@ -445,13 +447,13 @@ repoll:
 	//mutex_lock(&cb->rlock);
 	if (search_recv_buf_receiver(cb, tx_add->txid, &msg)){
 		ret = build_ktcp_recv_output(msg, buffer, tx_add);
-		mutex_unlock(&cb->rlock);
+		//mutex_unlock(&cb->rlock);
 		HANDLER_DEBUG("request %d retrieved\n", tx_add->txid);
 		return ret;
 	}
-	HANDLER_DEBUG("found nothing in buffer, sleep\n");
+	//HANDLER_DEBUG("found nothing in buffer, sleep\n");
 	//mutex_unlock(&cb->rlock);
-	//usleep_range(500, 1000);
+	usleep_range(1, 100);
 	goto repoll;
 }
 
