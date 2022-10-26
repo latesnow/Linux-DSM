@@ -42,4 +42,8 @@ int ktcp_release(struct ktcp_cb *conn_cb);
 
 int kvm_dsm_msg_receiver(void *data);
 
+int ktcp_throughput_test_r(struct ktcp_cb *cb);
+
+int ktcp_throughput_test_s(struct ktcp_cb *cb);
+
 #endif /* __KVM_X86_KTCP_H */

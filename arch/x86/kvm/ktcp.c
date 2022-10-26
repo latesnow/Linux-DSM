@@ -276,6 +276,66 @@ read_again:
 
 	return len;
 }
+
+/*
+*/
+
+int ktcp_throughput_test_s(struct ktcp_cb *cb)
+{
+	char* local_buffer;
+	tx_add_t tx_add;
+	int i, ret;
+
+	i = 0;
+	local_buffer = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!local_buffer) {
+			printk(KERN_WARNING "ktcp_receiver: kzalloc failed\n");
+			ret = -ENOMEM;
+			return ret;
+	}
+	tx_add.txid = 0x11;
+	while(1){
+		ktcp_send(cb, local_buffer, PAGE_SIZE, 0, &tx_add);
+		i++;
+		if (i >= 1024){
+			break;
+		}
+	}
+	return 0;
+}
+
+int ktcp_throughput_test_r(struct ktcp_cb *cb)
+{
+	char* local_buffer;
+	int i, ret;
+
+	i = 0;
+	local_buffer = kzalloc(KTCP_BUFFER_SIZE, GFP_KERNEL);	
+	if (!local_buffer) {
+			printk(KERN_WARNING "ktcp_receiver: kzalloc failed\n");
+			ret = -ENOMEM;
+			return ret;
+	}
+	while(1){
+		ret = __ktcp_receive(cb->socket, local_buffer, KTCP_BUFFER_SIZE, 0);//?
+		if (ret < 0) {
+			if (ret == -EAGAIN) {
+				KTCP_DEBUG("ktcp_receiver: EAGAIN\n");
+				continue;
+			}
+			kfree(local_buffer);
+			printk(KERN_ERR "%s: __ktcp_receive error, ret %d\n",
+					__func__, ret);
+			break;
+		}
+		i++;
+		if(i >= 1024){
+			kfree(local_buffer);
+			return 0;
+		}
+	}
+	return 0;
+}
 /*
 message receiver function
 */

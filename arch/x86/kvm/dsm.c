@@ -27,6 +27,8 @@
 bool kvm_dsm_dbg_verbose = 0;
 #endif
 
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
+
 static int kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 		gfn_t gfn, bool is_smm, int write);
 
@@ -473,6 +475,8 @@ static int kvm_dsm_threadfn(void *data)
 		conn->kvm = kvm;
 		conn->sock = accept_sock;
 
+		ktcp_throughput_test_r(accept_sock);
+		ktcp_throughput_test_s(accept_sock);
 		for (i = 0; i < NDSM_CONN_THREADS -1; i++) {
 			/*
 			 * The count is somewhat meaningless since it doesn't contain

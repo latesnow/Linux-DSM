@@ -26,6 +26,8 @@
 #include <linux/kthread.h>
 #include <linux/mmu_context.h>
 
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
+
 enum kvm_dsm_request_type {
 	DSM_REQ_INVALIDATE,
 	DSM_REQ_READ,
@@ -89,6 +91,8 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 		.txid = generate_txid(kvm, dest_id),
 	};
 	int retry_cnt = 0;
+	struct timespec ts;
+	uint64_t start_time, end_time;
 
 	if (kvm->arch.dsm_stopped)
 		return -EINVAL;
@@ -110,6 +114,11 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 				mutex_unlock(&kvm->arch.conn_init_lock);
 				return ret;
 			}
+			timestamp(ts, start_time);
+			ktcp_throughput_test_s(*conn_sock);
+			ktcp_throughput_test_r(*conn_sock);
+			timestamp(ts, end_time);
+			printk(KERN_WARNING "ktcp_throughput_test: total time %llu\n", end_time - start_time);
 		}
 		mutex_unlock(&kvm->arch.conn_init_lock);
 	}
