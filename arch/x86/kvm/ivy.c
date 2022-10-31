@@ -564,8 +564,8 @@ retry_handle_req:
 		default:
 			BUG();
 		}
-		timestamp(ts, micro_time);
-		req_latency_debug("req %d replied at %llu\n", tx_add.txid, micro_time);
+		//timestamp(ts, micro_time);
+		//req_latency_debug("req %d replied at %llu\n", tx_add.txid, micro_time);
 
 		/* Once a request has been completed, this node isn't owner then. */
 		if (req.req_type != DSM_REQ_INVALIDATE)
