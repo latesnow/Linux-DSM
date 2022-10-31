@@ -26,6 +26,9 @@
 #include <linux/kthread.h>
 #include <linux/mmu_context.h>
 
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
+#define latency_debug(fmt, args...) printk(KERN_WARNING fmt, ##args)
+
 enum kvm_dsm_request_type {
 	DSM_REQ_INVALIDATE,
 	DSM_REQ_READ,
@@ -83,6 +86,9 @@ struct dsm_response {
 static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 		const struct dsm_request *req, void *data, struct dsm_response *resp)
 {
+	static uint32_t call_count = 0;
+	struct timespec ts;
+	uint64_t start_time = 0, end_time = 0;
 	kconnection_t **conn_sock;
 	int ret;
 	tx_add_t tx_add = {
@@ -120,12 +126,15 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 
 	ret = network_ops.send(*conn_sock, (const char *)req, sizeof(struct
 				dsm_request), 0, &tx_add);
+	//call_count = (call_count + 1) % 10000;
+	//if(call_count == 0) timestamp(ts, start_time);
 	if (ret < 0)
 		goto done;
 
 	retry_cnt = 0;
 	if (req->req_type == DSM_REQ_INVALIDATE) {
 		ret = network_ops.receive(*conn_sock, data, 0, &tx_add);
+		//if(call_count == 0) timestamp(ts, end_time);
 	}
 	else {
 retry:
@@ -140,9 +149,11 @@ retry:
 			}
 			goto retry;
 		}
+		//if(call_count == 0) timestamp(ts, end_time);
 		resp->inv_copyset = tx_add.inv_copyset;
 		resp->version = tx_add.version;
 	}
+	//if(call_count == 0) latency_debug("fetch latency:%llu micro sec\n", end_time - start_time);
 	if (ret < 0)
 		goto done;
 
