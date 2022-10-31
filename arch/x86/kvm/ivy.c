@@ -114,11 +114,13 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 				mutex_unlock(&kvm->arch.conn_init_lock);
 				return ret;
 			}
+			/*
 			timestamp(ts, start_time);
 			ktcp_throughput_test_s(*conn_sock);
 			ktcp_throughput_test_r(*conn_sock);
 			timestamp(ts, end_time);
 			printk(KERN_WARNING "ktcp_throughput_test: total time %llu\n", end_time - start_time);
+			*/
 		}
 		mutex_unlock(&kvm->arch.conn_init_lock);
 	}

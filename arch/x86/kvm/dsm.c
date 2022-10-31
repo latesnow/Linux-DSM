@@ -475,8 +475,10 @@ static int kvm_dsm_threadfn(void *data)
 		conn->kvm = kvm;
 		conn->sock = accept_sock;
 
+		/*
 		ktcp_throughput_test_r(accept_sock);
 		ktcp_throughput_test_s(accept_sock);
+		*/
 		for (i = 0; i < NDSM_CONN_THREADS -1; i++) {
 			/*
 			 * The count is somewhat meaningless since it doesn't contain
