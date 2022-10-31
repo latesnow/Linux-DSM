@@ -134,6 +134,7 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 				dsm_request), 0, &tx_add);
 	if (ret < 0)
 		goto done;
+	//timestamp(ts, start_time);
 
 	retry_cnt = 0;
 	if (req->req_type == DSM_REQ_INVALIDATE) {
@@ -157,6 +158,8 @@ retry:
 	}
 	if (ret < 0)
 		goto done;
+	//timestamp(ts, end_time);
+	//req_latency_debug("latency in micro secs:%llu\n", end_time - start_time);
 
 done:
 	return ret;
