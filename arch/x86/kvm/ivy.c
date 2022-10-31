@@ -26,6 +26,7 @@
 #include <linux/kthread.h>
 #include <linux/mmu_context.h>
 
+#define req_latency_debug(format, args...) printk(KERN_WARNING "req_latency_debug:"format, ##args)
 #define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
 
 enum kvm_dsm_request_type {
@@ -460,6 +461,9 @@ int ivy_kvm_dsm_handle_req(void *data)
 	char *page;
 	int len;
 
+	struct timespec ts;
+	uint64_t micro_time;
+
 	/* Size of the maximum buffer is PAGE_SIZE */
 	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (page == NULL)
@@ -557,6 +561,8 @@ retry_handle_req:
 		default:
 			BUG();
 		}
+		timestamp(ts, micro_time);
+		req_latency_debug("req %d replied at %llu\n", tx_add.txid, micro_time);
 
 		/* Once a request has been completed, this node isn't owner then. */
 		if (req.req_type != DSM_REQ_INVALIDATE)

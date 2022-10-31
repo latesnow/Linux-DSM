@@ -41,6 +41,10 @@
 #define KR_DEBUG(format, args...) 
 //#define HANDLER_DEBUG(format, args...) printk(KERN_WARNING "handler:"format, ##args)
 #define HANDLER_DEBUG(format, args...) 
+//#define req_latency_debug(format, args...) printk(KERN_WARNING "req_latency_debug:"format, ##args)
+#define req_latency_debug(format, args...)
+
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
 
 #define KTCP_RECV_BUF_SIZE 32
 
@@ -357,6 +361,8 @@ int kvm_dsm_msg_receiver(void *data)
 	struct dsm_conn *conn;
 	uint32_t retry_cnt;
 	int agent_idx;
+	struct timespec ts;
+	uint64_t micro_time;
 
 
 	BUG_ON(data == NULL);
@@ -401,10 +407,12 @@ int kvm_dsm_msg_receiver(void *data)
 			//mutex_unlock(&cb->rlock);
 			break;
 		}
+		//timestamp(ts, micro_time);
 		usec_sleep = 0;
 		memcpy(&hdr, local_buffer, sizeof(hdr));
 		msg.recv_buf = local_buffer;
 		msg.txid = hdr.tx_add.txid;
+		//req_latency_debug("req %d received at %llu\n", msg.txid, micro_time);
 		//printk(KERN_WARNING "ktcp_receiver:got msg %d %d\n", hdr.tx_add.txid, hdr.length - sizeof(struct ktcp_hdr));
 		//mutex_lock(&cb->rlock);
 		if(conn->threads[agent_idx] == NULL) printk(KERN_ERR "thread = NULL!\n");
