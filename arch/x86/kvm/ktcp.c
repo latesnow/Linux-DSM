@@ -455,11 +455,11 @@ int ktcp_receive(struct ktcp_cb *cb, char *buffer, unsigned long flags,
 		return ktcp_receive_with_receiver(cb, buffer, tx_add);
 	}
 
-	mutex_lock(&cb->rlock);
+	//mutex_lock(&cb->rlock);
 repoll:
 	if (search_recv_buf(cb, tx_add->txid, &msg)){
 		ret = build_ktcp_recv_output(msg, buffer, tx_add);
-		mutex_unlock(&cb->rlock);
+		//mutex_unlock(&cb->rlock);
 		return ret;
 	}
 	local_buffer = kzalloc(KTCP_BUFFER_SIZE, GFP_KERNEL);
@@ -470,10 +470,12 @@ repoll:
 	ret = __ktcp_receive(cb->socket, local_buffer, KTCP_BUFFER_SIZE, flags);
 	if (ret < 0) {
 		if (ret == -EAGAIN) {
+			/*
 			mutex_unlock(&cb->rlock);
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
 			usleep_range(usec_sleep, usec_sleep);
 			mutex_lock(&cb->rlock);
+			*/
 			kfree(local_buffer);
 			goto repoll;
 		}
@@ -486,12 +488,16 @@ repoll:
 	memcpy(&hdr, local_buffer, sizeof(hdr));
 	msg.recv_buf = local_buffer;
 	msg.txid = hdr.tx_add.txid;
+	if(tx_add->txid != msg.txid) printk(KERN_WARNING "expect %d, got %d\n", tx_add->txid, msg.txid);
+	//BUG_ON(msg.txid != tx_add->txid);
 	if (hdr.tx_add.txid != tx_add->txid && tx_add->txid != 0xFF){
 		while(!insert_into_recv_buf(cb, msg)){
+			/*
 			mutex_unlock(&cb->rlock);
 			usec_sleep = (usec_sleep + 1) > 1000 ? 1000 : (usec_sleep + 1);
 			usleep_range(usec_sleep, usec_sleep);
 			mutex_lock(&cb->rlock);
+			*/
 		}
 		usec_sleep = 0;
 		goto repoll;
@@ -500,7 +506,7 @@ repoll:
 		build_ktcp_recv_output(msg, buffer, tx_add);
 	}
 out:
-	mutex_unlock(&cb->rlock);
+	//mutex_unlock(&cb->rlock);
 	return ret < 0 ? ret : hdr.length - sizeof(struct ktcp_hdr);
 }
 
