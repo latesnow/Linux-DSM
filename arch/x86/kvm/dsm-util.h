@@ -47,8 +47,8 @@ extern bool kvm_dsm_dbg_verbose;
 
 struct kvm_network_ops {
 	int (*send)(kconnection_t *, const char *, size_t, unsigned long,
-			const tx_add_t*);
-	int (*receive)(kconnection_t *, char *, unsigned long, tx_add_t*);
+			const tx_add_t*, int);
+	int (*receive)(kconnection_t *, char *, unsigned long, tx_add_t*, int);
 	int (*connect)(const char *, const char *, kconnection_t **);
 	int (*listen)(const char *, const char *, kconnection_t **);
 	int (*accept)(kconnection_t *, kconnection_t **, unsigned long);
@@ -62,12 +62,12 @@ struct dsm_address {
 	char port[8];
 };
 
-#define NDSM_CONN_THREADS 8
+#define NDSM_CONN_THREADS 1
 struct dsm_conn {
 	struct list_head link;
 	struct kvm *kvm;
 	kconnection_t *sock;
-	struct task_struct *threads[NDSM_CONN_THREADS];
+	struct task_struct *threads[NDSM_CONN_THREADS + 1]; //CL: add extra thread to recv msgs only, other threads only search and read from the msg_buffer
 };
 
 /* mmu.c */
