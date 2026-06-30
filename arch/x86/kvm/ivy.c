@@ -26,6 +26,9 @@
 #include <linux/kthread.h>
 #include <linux/mmu_context.h>
 
+#define req_latency_debug(format, args...) printk(KERN_WARNING "req_latency_debug:"format, ##args)
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
+
 enum kvm_dsm_request_type {
 	DSM_REQ_INVALIDATE,
 	DSM_REQ_READ,
@@ -89,6 +92,8 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 		.txid = generate_txid(kvm, dest_id),
 	};
 	int retry_cnt = 0;
+	struct timespec ts;
+	uint64_t start_time, end_time;
 
 	if (kvm->arch.dsm_stopped)
 		return -EINVAL;
@@ -110,6 +115,13 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 				mutex_unlock(&kvm->arch.conn_init_lock);
 				return ret;
 			}
+			/*
+			timestamp(ts, start_time);
+			ktcp_throughput_test_s(*conn_sock);
+			ktcp_throughput_test_r(*conn_sock);
+			timestamp(ts, end_time);
+			printk(KERN_WARNING "ktcp_throughput_test: total time %llu\n", end_time - start_time);
+			*/
 		}
 		mutex_unlock(&kvm->arch.conn_init_lock);
 	}
@@ -122,14 +134,15 @@ static int kvm_dsm_fetch(struct kvm *kvm, uint16_t dest_id, bool from_server,
 				dsm_request), 0, &tx_add);
 	if (ret < 0)
 		goto done;
+	//timestamp(ts, start_time);
 
 	retry_cnt = 0;
 	if (req->req_type == DSM_REQ_INVALIDATE) {
-		ret = network_ops.receive(*conn_sock, data, 0, &tx_add);
+		ret = network_ops.receive(*conn_sock, data, 0, &tx_add, 0);
 	}
 	else {
 retry:
-		ret = network_ops.receive(*conn_sock, data, SOCK_NONBLOCK, &tx_add);
+		ret = network_ops.receive(*conn_sock, data, SOCK_NONBLOCK, &tx_add, 0);
 		if (ret == -EAGAIN) {
 			retry_cnt++;
 			if (retry_cnt > 100000) {
@@ -145,6 +158,8 @@ retry:
 	}
 	if (ret < 0)
 		goto done;
+	//timestamp(ts, end_time);
+	//req_latency_debug("latency in micro secs:%llu\n", end_time - start_time);
 
 done:
 	return ret;
@@ -449,6 +464,9 @@ int ivy_kvm_dsm_handle_req(void *data)
 	char *page;
 	int len;
 
+	struct timespec ts;
+	uint64_t micro_time;
+
 	/* Size of the maximum buffer is PAGE_SIZE */
 	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (page == NULL)
@@ -465,7 +483,7 @@ int ivy_kvm_dsm_handle_req(void *data)
 			goto out;
 		}
 
-		len = network_ops.receive(conn_sock, (char*)&req, 0, &tx_add);
+		len = network_ops.receive(conn_sock, (char*)&req, 0, &tx_add, 1);
 		BUG_ON(len > 0 && len != sizeof(struct dsm_request));
 
 		if (len <= 0) {
@@ -546,6 +564,8 @@ retry_handle_req:
 		default:
 			BUG();
 		}
+		//timestamp(ts, micro_time);
+		//req_latency_debug("req %d replied at %llu\n", tx_add.txid, micro_time);
 
 		/* Once a request has been completed, this node isn't owner then. */
 		if (req.req_type != DSM_REQ_INVALIDATE)

@@ -18,6 +18,7 @@
 #include <linux/kvm.h>
 #include "dsm.h"
 #include "mmu.h"
+#include "ktcp.h"
 
 #include <linux/kthread.h>
 #include <linux/mmu_context.h>
@@ -25,6 +26,8 @@
 #ifdef KVM_DSM_DEBUG
 bool kvm_dsm_dbg_verbose = 0;
 #endif
+
+#define timestamp(ts,t) {getnstimeofday(&ts); t = ts.tv_sec * 1000 * 1000ULL + ts.tv_nsec / 1000;}
 
 static int kvm_dsm_page_fault(struct kvm *kvm, struct kvm_memory_slot *memslot,
 		gfn_t gfn, bool is_smm, int write);
@@ -472,7 +475,11 @@ static int kvm_dsm_threadfn(void *data)
 		conn->kvm = kvm;
 		conn->sock = accept_sock;
 
-		for (i = 0; i < NDSM_CONN_THREADS; i++) {
+		/*
+		ktcp_throughput_test_r(accept_sock);
+		ktcp_throughput_test_s(accept_sock);
+		*/
+		for (i = 0; i < NDSM_CONN_THREADS -1; i++) {
 			/*
 			 * The count is somewhat meaningless since it doesn't contain
 			 * information about which remote node it connects to.
@@ -486,6 +493,14 @@ static int kvm_dsm_threadfn(void *data)
 			}
 			conn->threads[i] = thread;
 		}
+		//create the msg receiver first
+		thread = kthread_run(kvm_dsm_msg_receiver, (void*) conn, "dsm-conn/%d,msg_receiver", kvm->arch.dsm_id);
+		if (IS_ERR(thread)) {
+			printk(KERN_ERR "kvm-dsm: failed to start kernel thread for dsm connection\n");
+			ret = PTR_ERR(thread);
+			goto out_accept_sock;
+		}
+		conn->threads[NDSM_CONN_THREADS -1] = thread;
 		list_add_tail(&conn->link, &conn_list);
 	}
 
